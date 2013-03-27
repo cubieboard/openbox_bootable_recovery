@@ -32,7 +32,7 @@
 
 #include "font_10x18.h"
 #include "minui.h"
-
+#include "../../../device/allwinner/common/hardware/include/drv_display_sun4i.h"
 #if defined(RECOVERY_BGRA)
 #define PIXEL_FORMAT GGL_PIXEL_FORMAT_BGRA_8888
 #define PIXEL_SIZE   4
@@ -82,14 +82,14 @@ static int get_framebuffer(GGLSurface *fb)
     }
 
     vi.bits_per_pixel = PIXEL_SIZE * 8;
-    if (PIXEL_FORMAT == GGL_PIXEL_FORMAT_BGRA_8888) {
-      vi.red.offset     = 8;
+    if (PIXEL_FORMAT == GGL_PIXEL_FORMAT_BGRA_8888) {	//use this for sun4i
+      vi.red.offset     = 16;
       vi.red.length     = 8;
-      vi.green.offset   = 16;
+      vi.green.offset   = 8;
       vi.green.length   = 8;
-      vi.blue.offset    = 24;
+      vi.blue.offset    = 0;
       vi.blue.length    = 8;
-      vi.transp.offset  = 0;
+      vi.transp.offset  = 24;
       vi.transp.length  = 8;
     } else if (PIXEL_FORMAT == GGL_PIXEL_FORMAT_RGBX_8888) {
       vi.red.offset     = 24;
@@ -303,7 +303,75 @@ int gr_init(void)
 {
     gglInit(&gr_context);
     GGLContext *gl = gr_context;
+    int                     ret;
+    unsigned long 			args[4];
+	int mFD_disp = 0;
+	__disp_fb_create_para_t fb_para;
+	
+	printf("\nRecovery gr_init()\n");
+    if(mFD_disp == 0)
+    {
+        mFD_disp = open("/dev/disp", O_RDWR, 0);
+        if (mFD_disp < 0) 
+        {
+            printf("open display device failed!\n");
 
+            mFD_disp = 0;
+            
+            return -1;
+        }
+    }
+
+    args[0] = 0;
+	ret = ioctl(mFD_disp,DISP_CMD_HDMI_OFF,args);
+
+	args[0] = 0;
+	ret = ioctl(mFD_disp,DISP_CMD_FB_RELEASE,args);
+
+	args[0] = 0;
+    ret = ioctl(mFD_disp,DISP_CMD_HDMI_GET_HPD_STATUS,args);
+	if(ret == 1)
+	{
+		args[0] =0;
+		args[1] = DISP_TV_MOD_720P_50HZ;
+		ret = ioctl(mFD_disp,DISP_CMD_HDMI_SET_MODE,args);
+
+		args[0] =0;
+		ret = ioctl(mFD_disp,DISP_CMD_HDMI_ON,args);
+	} 
+	else
+	{
+    	args[0] = 0;
+        ret = ioctl(mFD_disp,DISP_CMD_TV_GET_INTERFACE,args);
+    	if(ret & DISP_TV_YPBPR)
+    	{
+    		args[0] =0;
+    		args[1] = DISP_TV_MOD_720P_50HZ;
+    		ret = ioctl(mFD_disp,DISP_CMD_TV_SET_MODE,args);
+    
+    		args[0] =0;
+    		ret = ioctl(mFD_disp,DISP_CMD_TV_ON,args);
+    	}
+    	else if(ret & DISP_TV_CVBS)
+    	{
+    		args[0] =0;
+    		args[1] = DISP_TV_MOD_NTSC;
+    		ret = ioctl(mFD_disp,DISP_CMD_TV_SET_MODE,args);
+    
+    		args[0] =0;
+    		ret = ioctl(mFD_disp,DISP_CMD_TV_ON,args);
+    	}
+    }
+    
+	fb_para.fb_mode = FB_MODE_SCREEN0;
+	fb_para.mode = DISP_LAYER_WORK_MODE_NORMAL;
+	fb_para.buffer_num = 2;
+	fb_para.width = ioctl(mFD_disp,DISP_CMD_SCN_GET_WIDTH,args);
+	fb_para.height = ioctl(mFD_disp,DISP_CMD_SCN_GET_HEIGHT,args);
+	args[0] = 0;
+	args[1] = &fb_para;
+	ret = ioctl(mFD_disp,DISP_CMD_FB_REQUEST,args);
+ 
     gr_init_font();
     gr_vt_fd = open("/dev/tty0", O_RDWR | O_SYNC);
     if (gr_vt_fd < 0) {

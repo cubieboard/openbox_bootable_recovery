@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -58,6 +59,7 @@ static const char *SDCARD_ROOT = "/sdcard";
 static const char *TEMPORARY_LOG_FILE = "/tmp/recovery.log";
 static const char *TEMPORARY_INSTALL_FILE = "/tmp/last_install";
 static const char *SIDELOAD_TEMP_DIR = "/tmp/sideload";
+static const char *GUID_STR = "646212C46B774f95BBBE2F9CCFF32797";
 
 extern UIParameters ui_parameters;    // from ui.c
 
@@ -639,6 +641,7 @@ wipe_data(int confirm) {
     device_wipe_data();
     erase_volume("/data");
     erase_volume("/cache");
+	copy_databk_to_data();
     ui_print("Data wipe complete.\n");
 }
 
@@ -727,7 +730,51 @@ static void
 print_property(const char *key, const char *name, void *cookie) {
     printf("%s=%s\n", key, name);
 }
-
+int copy_databk_to_data(){
+	printf("begin copy databk to data\n");
+    char *argv_execv[] = {"data_resume.sh", NULL};
+	ensure_path_mounted("/data");
+	ensure_path_mounted("/system");
+    pid_t pid =fork();
+	if(pid==0){
+		execv("/system/bin/data_resume.sh",argv_execv);
+		_exit(-1);
+	}
+	int status;
+    waitpid(pid, &status, 0);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        printf("Error (Status %d),fail to resume data\n", WEXITSTATUS(status));
+		ensure_path_unmounted("/data");
+	    ensure_path_unmounted("/system");
+        return -1;
+    }
+    printf("copy databk to data succeed\n");
+	remove_apk("/system/app/",GUID_STR);
+	remove_apk("/data/app/",GUID_STR);
+	ensure_path_unmounted("/data");
+	ensure_path_unmounted("/system");
+    return 0;		 
+}
+int remove_apk(char *path,const char *str){
+   DIR *dp;
+   struct dirent *dirp;
+   dp=opendir(path);
+   if(dp==NULL){
+      printf("Can't open %s\n",path);
+	  return -1;
+   }
+   while((dirp=readdir(dp))!=NULL){
+   	 char *file=dirp->d_name;
+	 if(strstr(file,str)!=NULL){
+	 	 char path_app[1024]="";
+         char *apkfile = strcat(path_app,path);
+		 apkfile=strcat(path_app,file);
+		 printf("delete apk :%s\n",apkfile);
+         remove(apkfile);
+	  }
+   }
+   return 0;
+}
 int
 main(int argc, char **argv) {
     time_t start = time(NULL);
@@ -804,6 +851,7 @@ main(int argc, char **argv) {
         if (device_wipe_data()) status = INSTALL_ERROR;
         if (erase_volume("/data")) status = INSTALL_ERROR;
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
+		copy_databk_to_data();
         if (status != INSTALL_SUCCESS) ui_print("Data wipe failed.\n");
     } else if (wipe_cache) {
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
